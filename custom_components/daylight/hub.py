@@ -206,18 +206,15 @@ class Hub:
 
     # Resume
 
-    async def async_resume(self, entity_ids: set[str] | None, entry_id: str | None) -> None:
-        """Clear manual control and adapt straight away."""
-        lights: set[str] = set()
-        if entity_ids is not None:
-            lights |= self.expand(entity_ids)[0]
-        if entry_id is not None and (profile := self.profiles.get(entry_id)):
-            lights |= set(profile.lights)
+    async def async_resume(self, entity_ids: set[str]) -> None:
+        """Clear manual control and adapt straight away.
+
+        Each light is resumed by the profile that owns it; lights no profile
+        owns are ignored.
+        """
         tasks = []
-        for entity_id in lights:
+        for entity_id in self.expand(entity_ids)[0]:
             if (profile := self.owner.get(entity_id)) is None:
-                continue
-            if entry_id is not None and entity_ids is None and profile.entry.entry_id != entry_id:
                 continue
             profile.clear_manual(entity_id, REASON_RESUME)
             profile.update_target()

@@ -13,18 +13,13 @@ from homeassistant.helpers.target import (
 )
 from homeassistant.helpers.typing import ConfigType
 
-from .const import ATTR_CONFIG_ENTRY_ID, DOMAIN, SERVICE_RESUME
+from .const import DOMAIN, SERVICE_RESUME
 from .hub import DATA_HUB, Hub
 from .profile import DaylightConfigEntry, Profile
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-RESUME_SCHEMA = probatio.Schema(
-    {
-        **cv.ENTITY_SERVICE_FIELDS,
-        probatio.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
-    }
-)
+RESUME_SCHEMA = probatio.Schema(cv.ENTITY_SERVICE_FIELDS)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -32,25 +27,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hub = hass.data[DATA_HUB] = Hub(hass)
 
     async def resume(call: ServiceCall) -> None:
-        entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)
         selection = TargetSelection(call.data)
-        if not selection.has_any_target and entry_id is None:
+        if not selection.has_any_target:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="resume_needs_target"
             )
-        entity_ids: set[str] | None = None
-        if selection.has_any_target:
-            selected = async_extract_referenced_entity_ids(
-                hass, selection, expand_group=False
-            )
-            entity_ids = selected.referenced | selected.indirectly_referenced
-        if entry_id is not None and entry_id not in hub.profiles:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="unknown_profile",
-                translation_placeholders={"entry_id": entry_id},
-            )
-        await hub.async_resume(entity_ids, entry_id)
+        selected = async_extract_referenced_entity_ids(hass, selection, expand_group=False)
+        await hub.async_resume(
+            {
+                e
+                for e in selected.referenced | selected.indirectly_referenced
+                if e.startswith("light.")
+            }
+        )
 
     hass.services.async_register(DOMAIN, SERVICE_RESUME, resume, RESUME_SCHEMA)
     return True
