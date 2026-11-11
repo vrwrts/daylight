@@ -129,13 +129,7 @@
   "services": {
     "resume": {
       "name": "Resume",
-      "description": "Ends manual control and adapts the lights straight away.",
-      "fields": {
-        "config_entry_id": {
-          "name": "Profile",
-          "description": "Resume every light in this profile."
-        }
-      }
+      "description": "Ends manual control and adapts the lights straight away. Lights that no Daylight profile adapts are ignored."
     }
   },
   "triggers": {
@@ -176,10 +170,7 @@
   },
   "exceptions": {
     "resume_needs_target": {
-      "message": "Choose lights or a profile to resume."
-    },
-    "unknown_profile": {
-      "message": "No loaded Daylight profile with ID {entry_id}."
+      "message": "Choose the lights, devices, areas, floors or labels to resume."
     }
   }
 }

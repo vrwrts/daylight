@@ -3,11 +3,13 @@
 from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
+import probatio
 import pytest
 
 from homeassistant.components.light import ColorMode
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import (
     async_fire_time_changed,
@@ -158,32 +160,53 @@ async def test_light_on_at_start_is_adapted(
     assert lights["light.desk"].calls == [{"brightness": 255, "color_temp_kelvin": 3000}]
 
 
-@pytest.mark.parametrize("by", ["target", "profile"])
-async def test_resume(
-    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory, by: str
+async def test_resume_area_across_profiles(
+    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
 ) -> None:
     freezer.move_to(NOON)
-    entry = await add_profile(hass, TARGET)
-    await turn_on(hass, "light.desk", brightness_pct=20)
-    assert entry.runtime_data.lights["light.desk"].manual
+    main = await add_profile(hass, {"entity_id": ["light.desk"]}, title="Main")
+    freezer.tick(timedelta(seconds=1))
+    dimmed = await add_profile(
+        hass, {"entity_id": ["light.hall"]}, title="Dimmed", brightness={"peak": 20}
+    )
+    living = ar.async_get(hass).async_create("Living room")
+    entities = er.async_get(hass)
+    for light in ("light.desk", "light.hall", "light.narrow"):
+        entities.async_update_entity(light, area_id=living.id)
 
-    data = {"entity_id": "light.desk"} if by == "target" else {"config_entry_id": entry.entry_id}
-    await hass.services.async_call(DOMAIN, "resume", data, blocking=True)
+    # light.narrow is in no profile.
+    await turn_on(hass, ["light.desk", "light.hall", "light.narrow"], brightness_pct=40)
+    assert main.runtime_data.lights["light.desk"].manual
+    assert dimmed.runtime_data.lights["light.hall"].manual
+    narrow_calls = len(setup_lights["light.narrow"].calls)
+
+    await hass.services.async_call(
+        DOMAIN, "resume", {"area_id": living.id}, blocking=True
+    )
     await hass.async_block_till_done()
-    assert not entry.runtime_data.lights["light.desk"].manual
+    # Each light is resumed by its own profile, at that profile's values.
+    assert not main.runtime_data.lights["light.desk"].manual
+    assert not dimmed.runtime_data.lights["light.hall"].manual
     assert setup_lights["light.desk"].calls[-1] == {
-        "brightness": 255,
-        "color_temp_kelvin": 3000,
-        "transition": 10,
+        "brightness": 255, "color_temp_kelvin": 3000, "transition": 10
     }
+    assert setup_lights["light.hall"].calls[-1] == {
+        "brightness": 51, "color_temp_kelvin": 3000, "transition": 10
+    }
+    assert len(setup_lights["light.narrow"].calls) == narrow_calls
 
 
 async def test_resume_needs_target(
     hass: HomeAssistant, setup_lights: dict[str, MockLight]
 ) -> None:
-    await add_profile(hass, TARGET)
+    entry = await add_profile(hass, TARGET)
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(DOMAIN, "resume", {}, blocking=True)
+    # Resuming by profile is no longer part of the action.
+    with pytest.raises(probatio.Invalid):
+        await hass.services.async_call(
+            DOMAIN, "resume", {"config_entry_id": entry.entry_id}, blocking=True
+        )
 
 
 async def test_night_mode(

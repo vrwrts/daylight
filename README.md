@@ -124,18 +124,12 @@ Daylight sends brightness and colour temperature to lights that support colour t
 
 ### `daylight.resume`
 
-Ends manual control and adapts the lights straight away. Target lights, devices, areas, floors or labels, or pick a profile to resume all its lights.
+Ends manual control and adapts the lights straight away. A target is required: lights, devices, areas, floors or labels. Light groups are expanded to their members. Each light is resumed by the profile that adapts it, so one call can cover lights from several profiles. Lights that no profile adapts are ignored.
 
 ```yaml
 action: daylight.resume
 target:
-  entity_id: light.living_room
-```
-
-```yaml
-action: daylight.resume
-data:
-  config_entry_id: 01JF3Y4M5N6P7Q8R9S0T1V2W3X
+  area_id: living_room
 ```
 
 ## Triggers

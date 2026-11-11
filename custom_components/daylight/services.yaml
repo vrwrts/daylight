@@ -2,8 +2,3 @@ resume:
   target:
     entity:
       domain: light
-  fields:
-    config_entry_id:
-      selector:
-        config_entry:
-          integration: daylight
