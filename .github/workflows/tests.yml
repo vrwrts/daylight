@@ -1,0 +1,16 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv venv -p 3.14 .venv
+      - run: uv pip install -p .venv -r requirements_test.txt
+      - run: .venv/bin/pytest -q

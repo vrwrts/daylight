@@ -1,0 +1,185 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "New Daylight profile",
+        "data": {
+          "name": "Name",
+          "lights": "Lights"
+        },
+        "data_description": {
+          "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Choose at least one light, device, area, floor or label."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Daylight profile",
+        "data": {
+          "lights": "Lights"
+        },
+        "data_description": {
+          "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
+        },
+        "sections": {
+          "schedule": {
+            "name": "Schedule",
+            "data": {
+              "wake_time": "Wake time",
+              "wake_entity": "Wake time entity",
+              "sleep_time": "Sleep time",
+              "sleep_entity": "Sleep time entity"
+            },
+            "data_description": {
+              "wake_entity": "Optional. A timestamp sensor, input_datetime or time entity. Its local time of day replaces the fixed wake time while it's available.",
+              "sleep_entity": "Optional. A timestamp sensor, input_datetime or time entity. Its local time of day replaces the fixed sleep time while it's available."
+            }
+          },
+          "brightness": {
+            "name": "Brightness",
+            "data": {
+              "wake": "At wake",
+              "peak": "Peak",
+              "sleep": "At sleep"
+            }
+          },
+          "color_temp": {
+            "name": "Colour temperature",
+            "data": {
+              "wake": "At wake",
+              "peak": "Peak",
+              "sleep": "At sleep"
+            }
+          },
+          "curve": {
+            "name": "Curve",
+            "data": {
+              "ramp_duration": "Ramp duration",
+              "curve": "Curve",
+              "transition": "Transition",
+              "update_interval": "Update interval"
+            },
+            "data_description": {
+              "ramp_duration": "How long the morning ramp after wake time and the evening ramp before sleep time take."
+            }
+          },
+          "winter": {
+            "name": "Winter brightening",
+            "data": {
+              "enabled": "Enabled",
+              "wake_brightness": "Winter brightness at wake",
+              "peak_brightness": "Winter peak brightness"
+            },
+            "data_description": {
+              "enabled": "Blend wake and peak brightness toward the winter values as days get shorter, based on your home's latitude."
+            }
+          },
+          "manual_control": {
+            "name": "Manual control",
+            "data": {
+              "mode": "Mode",
+              "timeout": "Timeout",
+              "brightness_tolerance": "Brightness tolerance",
+              "color_temp_tolerance": "Colour temperature tolerance"
+            },
+            "data_description": {
+              "timeout": "Only used when pausing for a set time.",
+              "brightness_tolerance": "Changes smaller than this, not made by Daylight, don't count as manual control.",
+              "color_temp_tolerance": "Changes smaller than this, not made by Daylight, don't count as manual control."
+            }
+          },
+          "night_mode": {
+            "name": "Night mode",
+            "data": {
+              "entity": "Night mode entity",
+              "brightness": "Night brightness",
+              "color_temp": "Night colour temperature"
+            },
+            "data_description": {
+              "entity": "Optional. While this entity is on, the night values are used instead of the curve."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Choose at least one light, device, area, floor or label.",
+      "same_times": "Wake time and sleep time can't be the same."
+    }
+  },
+  "selector": {
+    "curve": {
+      "options": {
+        "cosine": "Cosine",
+        "linear": "Linear"
+      }
+    },
+    "mode": {
+      "options": {
+        "until_off": "Pause until turned off",
+        "timeout": "Pause for a set time"
+      }
+    }
+  },
+  "services": {
+    "resume": {
+      "name": "Resume",
+      "description": "Ends manual control and adapts the lights straight away.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Profile",
+          "description": "Resume every light in this profile."
+        }
+      }
+    }
+  },
+  "triggers": {
+    "manual_control_started": {
+      "name": "Manual control started",
+      "description": "Triggers when Daylight stops adapting one of the lights because it was changed by something else."
+    },
+    "manual_control_ended": {
+      "name": "Manual control ended",
+      "description": "Triggers when Daylight starts adapting one of the lights again."
+    }
+  },
+  "conditions": {
+    "is_adapting": {
+      "name": "Light is adapted by Daylight",
+      "description": "Tests if Daylight is adapting one or more lights.",
+      "fields": {
+        "behavior": {
+          "name": "Condition passes if"
+        }
+      }
+    },
+    "is_manually_controlled": {
+      "name": "Light is under manual control",
+      "description": "Tests if one or more lights in a Daylight profile are under manual control.",
+      "fields": {
+        "behavior": {
+          "name": "Condition passes if"
+        }
+      }
+    }
+  },
+  "issues": {
+    "overlap": {
+      "title": "Lights in more than one Daylight profile",
+      "description": "Profile {profile} includes lights that an older profile already adapts. This profile leaves them alone: {lights}. Remove them from one of the profiles to clear this."
+    }
+  },
+  "exceptions": {
+    "resume_needs_target": {
+      "message": "Choose lights or a profile to resume."
+    },
+    "unknown_profile": {
+      "message": "No loaded Daylight profile with ID {entry_id}."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "domain": "daylight",
+  "name": "Daylight",
+  "codeowners": ["@nielsrowinbik"],
+  "config_flow": true,
+  "dependencies": ["light"],
+  "documentation": "https://github.com/vrwrts/daylight",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/vrwrts/daylight/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

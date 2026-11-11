@@ -1,0 +1,7 @@
+.manual_control: &manual_control
+  target:
+    entity:
+      domain: light
+
+manual_control_started: *manual_control
+manual_control_ended: *manual_control

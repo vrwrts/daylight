@@ -1,0 +1,13 @@
+{
+  "services": {
+    "resume": { "service": "mdi:play-circle-outline" }
+  },
+  "triggers": {
+    "manual_control_started": { "trigger": "mdi:hand-back-right" },
+    "manual_control_ended": { "trigger": "mdi:hand-back-right-off" }
+  },
+  "conditions": {
+    "is_adapting": { "condition": "mdi:theme-light-dark" },
+    "is_manually_controlled": { "condition": "mdi:hand-back-right" }
+  }
+}

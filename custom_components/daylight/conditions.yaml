@@ -1,0 +1,14 @@
+.status: &status
+  target:
+    entity:
+      domain: light
+  fields:
+    behavior:
+      required: true
+      default: any
+      selector:
+        automation_behavior:
+          mode: condition
+
+is_adapting: *status
+is_manually_controlled: *status
