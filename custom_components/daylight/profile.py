@@ -1,4 +1,4 @@
-"""A profile: one config entry, a set of lights sharing one curve."""
+"""A profile: one subentry, a set of lights with its own values along the shared curve."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from homeassistant.components.light import (
     ATTR_TRANSITION,
     ColorMode,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     STATE_ON,
@@ -33,11 +33,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import (
-    async_call_later,
-    async_track_state_change_event,
-    async_track_time_interval,
-)
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.target import (
     TargetStateChangedData,
     async_track_target_selector_state_change_event,
@@ -63,7 +59,6 @@ from .const import (
     CONF_SLEEP_TIME,
     CONF_TIMEOUT,
     CONF_TRANSITION,
-    CONF_UPDATE_INTERVAL,
     CONF_WAKE,
     CONF_WAKE_BRIGHTNESS,
     CONF_WAKE_ENTITY,
@@ -72,6 +67,8 @@ from .const import (
     MODE_TIMEOUT,
     QUIET_WINDOW_MARGIN,
     REASON_EXTERNAL_CHANGE,
+    REASON_PAUSED,
+    REASON_RESUME,
     REASON_TIMEOUT,
     REASON_TURNED_OFF,
     SECTION_BRIGHTNESS,
@@ -89,7 +86,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-type DaylightConfigEntry = ConfigEntry[Profile]
+type DaylightConfigEntry = ConfigEntry[dict[str, Profile]]
 
 
 @dataclass(slots=True)
@@ -97,6 +94,8 @@ class LightState:
     """What Daylight knows about one managed light."""
 
     manual: bool = False
+    # Paused by daylight.pause: manual until daylight.resume, nothing else ends it.
+    paused: bool = False
     manual_until: datetime | None = None
     last_sent: dict[str, Any] | None = None
     last_sent_at: float | None = None
@@ -130,20 +129,27 @@ def time_of_day(value: str | None, fallback: time) -> float:
 class Profile:
     """Runtime state and behaviour of one profile."""
 
-    def __init__(self, hass: HomeAssistant, entry: DaylightConfigEntry, hub: Hub) -> None:
-        """Initialise from the entry's options."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: DaylightConfigEntry,
+        subentry: ConfigSubentry,
+        hub: Hub,
+    ) -> None:
+        """Initialise from the entry's shared options and the subentry's own values."""
         self.hass = hass
         self.entry = entry
+        self.subentry = subentry
         self.hub = hub
-        options = entry.options
-        self.target_config: dict[str, Any] = options[CONF_LIGHTS]
-        self.schedule = options[SECTION_SCHEDULE]
-        self.brightness = options[SECTION_BRIGHTNESS]
-        self.color_temp = options[SECTION_COLOR_TEMP]
-        self.curve = options[SECTION_CURVE]
-        self.winter = options[SECTION_WINTER]
-        self.manual_options = options[SECTION_MANUAL]
-        self.night = options[SECTION_NIGHT]
+        shared, own = entry.options, subentry.data
+        self.target_config: dict[str, Any] = own[CONF_LIGHTS]
+        self.schedule = shared[SECTION_SCHEDULE]
+        self.brightness = own[SECTION_BRIGHTNESS]
+        self.color_temp = own[SECTION_COLOR_TEMP]
+        self.curve = shared[SECTION_CURVE]
+        self.winter = {**shared[SECTION_WINTER], **own[SECTION_WINTER]}
+        self.manual_options = shared[SECTION_MANUAL]
+        self.night = {**shared[SECTION_NIGHT], **own[SECTION_NIGHT]}
         self.transition = float(self.curve[CONF_TRANSITION])
 
         # Lights the target resolves to before and after expanding groups.
@@ -158,10 +164,15 @@ class Profile:
     @property
     def title(self) -> str:
         """Profile name."""
-        return self.entry.title
+        return self.subentry.title
+
+    @property
+    def subentry_id(self) -> str:
+        """Id of the profile's subentry."""
+        return self.subentry.subentry_id
 
     async def async_start(self) -> None:
-        """Start tracking lights, schedule entities and the update interval."""
+        """Start tracking the profile's lights."""
         self.update_target()
         self.hub.async_add_profile(self)
         self._unsubs.append(
@@ -171,27 +182,6 @@ class Profile:
                 self._handle_direct_state,
                 lambda ids: {e for e in ids if e.startswith("light.")},
                 self._handle_entities_update,
-            )
-        )
-        watched = [
-            entity
-            for entity in (
-                self.schedule.get(CONF_WAKE_ENTITY),
-                self.schedule.get(CONF_SLEEP_ENTITY),
-                self.night.get(CONF_ENTITY),
-            )
-            if entity
-        ]
-        if watched:
-            self._unsubs.append(
-                async_track_state_change_event(self.hass, watched, self._handle_schedule_change)
-            )
-        self._unsubs.append(
-            async_track_time_interval(
-                self.hass,
-                self._handle_interval,
-                timedelta(seconds=float(self.curve[CONF_UPDATE_INTERVAL])),
-                name=f"daylight {self.title}",
             )
         )
 
@@ -283,7 +273,8 @@ class Profile:
             if light.cancel_timer:
                 light.cancel_timer()
         for entity_id in owned - set(self.lights):
-            self.lights[entity_id] = LightState()
+            paused = entity_id in self.hub.paused
+            self.lights[entity_id] = LightState(manual=paused, paused=paused)
             self.hass.async_create_task(self.async_adapt(entity_id))
 
     # Adapting
@@ -331,25 +322,24 @@ class Profile:
             *(self.async_adapt(entity_id, transition=transition) for entity_id in self.lights)
         )
 
-    async def _handle_interval(self, now: datetime) -> None:
-        self.update_target()
-        await self.async_adapt_all(transition=self.transition)
-
-    async def _handle_schedule_change(self, event: Event[EventStateChangedData]) -> None:
-        self.update_target()
-        await self.async_adapt_all(transition=self.transition)
-
     # Manual control
 
     @callback
     def mark_manual(self, entity_id: str, reason: str) -> None:
-        """Stop adapting a light, according to the configured mode."""
+        """Stop adapting a light, according to the configured mode or a pause."""
         light = self.lights.get(entity_id)
         if light is None:
             return
         was_manual = light.manual
         light.manual = True
-        if self.manual_options[CONF_MODE] == MODE_TIMEOUT:
+        if reason == REASON_PAUSED:
+            light.paused = True
+        if light.paused:
+            if light.cancel_timer:
+                light.cancel_timer()
+                light.cancel_timer = None
+            light.manual_until = None
+        elif self.manual_options[CONF_MODE] == MODE_TIMEOUT:
             if light.cancel_timer:
                 light.cancel_timer()
             delay = float(self.manual_options[CONF_TIMEOUT]) * 60
@@ -370,14 +360,18 @@ class Profile:
 
     @callback
     def clear_manual(self, entity_id: str, reason: str) -> bool:
-        """End manual control. Return whether the light was manual."""
+        """End manual control. Return whether the light was manual.
+
+        Only daylight.resume ends a pause.
+        """
         light = self.lights.get(entity_id)
-        if light is None or not light.manual:
+        if light is None or not light.manual or (light.paused and reason != REASON_RESUME):
             return False
         if light.cancel_timer:
             light.cancel_timer()
             light.cancel_timer = None
         light.manual = False
+        light.paused = False
         light.manual_until = None
         _LOGGER.debug("%s: %s back under Daylight (%s)", self.title, entity_id, reason)
         async_dispatcher_send(self.hass, SIGNAL_MANUAL_CONTROL, entity_id, False, reason, self)

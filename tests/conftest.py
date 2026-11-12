@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -15,6 +18,7 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import (
@@ -24,9 +28,12 @@ from pytest_homeassistant.common import (
 
 from custom_components.daylight.const import (
     CONF_LIGHTS,
-    DEFAULT_OPTIONS,
+    DEFAULT_CENTRAL,
+    DEFAULT_PROFILE,
     DOMAIN,
+    SUBENTRY_PROFILE,
 )
+from custom_components.daylight.profile import Profile
 
 
 class MockLight(LightEntity):
@@ -113,24 +120,78 @@ async def setup_lights(hass: HomeAssistant, lights: dict[str, MockLight]) -> dic
     return lights
 
 
-def make_options(target: dict[str, Any], **sections: dict[str, Any]) -> dict[str, Any]:
-    """Default options with a target and overridden section values."""
-    options = deepcopy(DEFAULT_OPTIONS)
-    options[CONF_LIGHTS] = target
+def split_sections(
+    sections: dict[str, dict[str, Any]], shared: Mapping[str, Any] = DEFAULT_CENTRAL
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Overrides on top of `shared` and the profile defaults, split into the
+    Daylight entry's options and a profile's data."""
+    central = deepcopy(dict(shared))
+    own = deepcopy(DEFAULT_PROFILE)
     for name, values in sections.items():
-        options[name] = {**options[name], **values}
-    return options
+        for key, value in values.items():
+            target = own if key in DEFAULT_PROFILE.get(name, {}) else central
+            target[name][key] = value
+    return central, own
+
+
+def make_entry(
+    target: dict[str, Any], title: str = "Main", **sections: dict[str, Any]
+) -> MockConfigEntry:
+    """A Daylight entry with one profile, not yet added to hass."""
+    central, own = split_sections(sections)
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="Daylight",
+        version=2,
+        options=central,
+        subentries_data=[
+            {
+                "data": {CONF_LIGHTS: target, **own},
+                "subentry_type": SUBENTRY_PROFILE,
+                "title": title,
+                "unique_id": None,
+            }
+        ],
+    )
+
+
+@dataclass
+class ProfileHandle:
+    """A profile's subentry; looks up the running Profile, which a reload replaces."""
+
+    entry: MockConfigEntry
+    subentry_id: str
+
+    @property
+    def runtime_data(self) -> Profile:
+        """The running profile."""
+        return self.entry.runtime_data[self.subentry_id]
 
 
 async def add_profile(
     hass: HomeAssistant, target: dict[str, Any], title: str = "Main", **sections: dict[str, Any]
-) -> MockConfigEntry:
-    """Create and load a profile."""
-    entry = MockConfigEntry(domain=DOMAIN, title=title, options=make_options(target, **sections))
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
+) -> ProfileHandle:
+    """Add a profile to the Daylight entry, creating and loading the entry if needed.
+
+    Shared settings in `sections` replace the entry's options.
+    """
+    if entries := hass.config_entries.async_entries(DOMAIN):
+        entry = entries[0]
+        central, own = split_sections(sections, entry.options)
+        subentry = ConfigSubentry(
+            data=MappingProxyType({CONF_LIGHTS: target, **own}),
+            subentry_type=SUBENTRY_PROFILE,
+            title=title,
+            unique_id=None,
+        )
+        hass.config_entries.async_update_entry(entry, options=central)
+        hass.config_entries.async_add_subentry(entry, subentry)
+    else:
+        entry = make_entry(target, title, **sections)
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    return entry
+    return ProfileHandle(entry, list(entry.subentries)[-1])
 
 
 NOON = "2026-11-10 12:00:00+01:00"

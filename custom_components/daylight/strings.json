@@ -2,30 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "New Daylight profile",
-        "data": {
-          "name": "Name",
-          "lights": "Lights"
-        },
-        "data_description": {
-          "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
-        }
+        "title": "Daylight",
+        "description": "Set up Daylight, then add profiles to it."
       }
     },
-    "error": {
-      "no_lights": "Choose at least one light, device, area, floor or label."
+    "abort": {
+      "single_instance_allowed": "Daylight is already set up. Add profiles to it instead."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Daylight profile",
-        "data": {
-          "lights": "Lights"
-        },
-        "data_description": {
-          "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
-        },
+        "title": "Daylight",
+        "description": "Settings shared by all profiles.",
         "sections": {
           "schedule": {
             "name": "Schedule",
@@ -38,22 +27,6 @@
             "data_description": {
               "wake_entity": "Optional. A timestamp sensor, input_datetime or time entity. Its local time of day replaces the fixed wake time while it's available.",
               "sleep_entity": "Optional. A timestamp sensor, input_datetime or time entity. Its local time of day replaces the fixed sleep time while it's available."
-            }
-          },
-          "brightness": {
-            "name": "Brightness",
-            "data": {
-              "wake": "At wake",
-              "peak": "Peak",
-              "sleep": "At sleep"
-            }
-          },
-          "color_temp": {
-            "name": "Colour temperature",
-            "data": {
-              "wake": "At wake",
-              "peak": "Peak",
-              "sleep": "At sleep"
             }
           },
           "curve": {
@@ -71,12 +44,10 @@
           "winter": {
             "name": "Winter brightening",
             "data": {
-              "enabled": "Enabled",
-              "wake_brightness": "Winter brightness at wake",
-              "peak_brightness": "Winter peak brightness"
+              "enabled": "Enabled"
             },
             "data_description": {
-              "enabled": "Blend wake and peak brightness toward the winter values as days get shorter, based on your home's latitude."
+              "enabled": "Blend wake and peak brightness toward the winter values as days get shorter, based on your home's latitude. Each profile sets its own winter values."
             }
           },
           "manual_control": {
@@ -96,20 +67,126 @@
           "night_mode": {
             "name": "Night mode",
             "data": {
-              "entity": "Night mode entity",
-              "brightness": "Night brightness",
-              "color_temp": "Night colour temperature"
+              "entity": "Night mode entity"
             },
             "data_description": {
-              "entity": "Optional. While this entity is on, the night values are used instead of the curve."
+              "entity": "Optional. While this entity is on, each profile uses its night values instead of the curve."
             }
           }
         }
       }
     },
     "error": {
-      "no_lights": "Choose at least one light, device, area, floor or label.",
       "same_times": "Wake time and sleep time can't be the same."
+    }
+  },
+  "config_subentries": {
+    "profile": {
+      "entry_type": "Profile",
+      "initiate_flow": {
+        "user": "Add profile"
+      },
+      "step": {
+        "user": {
+          "title": "New profile",
+          "data": {
+            "name": "Name",
+            "lights": "Lights"
+          },
+          "data_description": {
+            "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
+          },
+          "sections": {
+            "brightness": {
+              "name": "Brightness",
+              "data": {
+                "wake": "At wake",
+                "peak": "Peak",
+                "sleep": "At sleep"
+              }
+            },
+            "color_temp": {
+              "name": "Colour temperature",
+              "data": {
+                "wake": "At wake",
+                "peak": "Peak",
+                "sleep": "At sleep"
+              }
+            },
+            "winter": {
+              "name": "Winter brightening",
+              "data": {
+                "wake_brightness": "Winter brightness at wake",
+                "peak_brightness": "Winter peak brightness"
+              },
+              "data_description": {
+                "wake_brightness": "Only used when winter brightening is enabled in the Daylight settings."
+              }
+            },
+            "night_mode": {
+              "name": "Night mode",
+              "data": {
+                "brightness": "Night brightness",
+                "color_temp": "Night colour temperature"
+              },
+              "data_description": {
+                "brightness": "Used while the night mode entity in the Daylight settings is on."
+              }
+            }
+          }
+        },
+        "reconfigure": {
+          "title": "Profile",
+          "data": {
+            "name": "Name",
+            "lights": "Lights"
+          },
+          "data_description": {
+            "lights": "Lights, devices, areas, floors or labels. Light groups are expanded to their members."
+          },
+          "sections": {
+            "brightness": {
+              "name": "Brightness",
+              "data": {
+                "wake": "At wake",
+                "peak": "Peak",
+                "sleep": "At sleep"
+              }
+            },
+            "color_temp": {
+              "name": "Colour temperature",
+              "data": {
+                "wake": "At wake",
+                "peak": "Peak",
+                "sleep": "At sleep"
+              }
+            },
+            "winter": {
+              "name": "Winter brightening",
+              "data": {
+                "wake_brightness": "Winter brightness at wake",
+                "peak_brightness": "Winter peak brightness"
+              },
+              "data_description": {
+                "wake_brightness": "Only used when winter brightening is enabled in the Daylight settings."
+              }
+            },
+            "night_mode": {
+              "name": "Night mode",
+              "data": {
+                "brightness": "Night brightness",
+                "color_temp": "Night colour temperature"
+              },
+              "data_description": {
+                "brightness": "Used while the night mode entity in the Daylight settings is on."
+              }
+            }
+          }
+        }
+      },
+      "error": {
+        "no_lights": "Choose at least one light, device, area, floor or label."
+      }
     }
   },
   "selector": {
@@ -129,13 +206,17 @@
   "services": {
     "resume": {
       "name": "Resume",
-      "description": "Ends manual control and adapts the lights straight away. Lights that no Daylight profile adapts are ignored."
+      "description": "Ends manual control, including a pause, and adapts the lights straight away. Lights that no Daylight profile adapts are ignored."
+    },
+    "pause": {
+      "name": "Pause",
+      "description": "Stops adapting the lights until they are resumed, also after they are turned off and after a restart. Lights that no Daylight profile adapts are ignored."
     }
   },
   "triggers": {
     "manual_control_started": {
       "name": "Manual control started",
-      "description": "Triggers when Daylight stops adapting one of the lights because it was changed by something else."
+      "description": "Triggers when Daylight stops adapting one of the lights because it was changed by something else or paused."
     },
     "manual_control_ended": {
       "name": "Manual control ended",
@@ -166,11 +247,18 @@
     "overlap": {
       "title": "Lights in more than one Daylight profile",
       "description": "Profile {profile} includes lights that an older profile already adapts. This profile leaves them alone: {lights}. Remove them from one of the profiles to clear this."
+    },
+    "migration_dropped_settings": {
+      "title": "Daylight profiles now share one schedule and curve",
+      "description": "Daylight now has one entry with shared settings, and your profiles are part of it. The schedule, curve, manual control, winter brightening switch and night mode entity are shared and were taken from {source}. These profiles had different values, which were dropped: {profiles}. Check the Daylight settings, then ignore this issue."
     }
   },
   "exceptions": {
     "resume_needs_target": {
       "message": "Choose the lights, devices, areas, floors or labels to resume."
+    },
+    "pause_needs_target": {
+      "message": "Choose the lights, devices, areas, floors or labels to pause."
     }
   }
 }

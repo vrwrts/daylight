@@ -2,3 +2,7 @@ resume:
   target:
     entity:
       domain: light
+pause:
+  target:
+    entity:
+      domain: light

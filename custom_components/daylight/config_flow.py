@@ -1,4 +1,4 @@
-"""Config and options flows for Daylight."""
+"""Config, options and profile subentry flows for Daylight."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlowWithReload,
+    ConfigSubentryFlow,
+    OptionsFlow,
+    SubentryFlowResult,
 )
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
@@ -58,7 +60,8 @@ from .const import (
     CONF_WAKE_TIME,
     CURVE_COSINE,
     CURVE_LINEAR,
-    DEFAULT_OPTIONS,
+    DEFAULT_CENTRAL,
+    DEFAULT_PROFILE,
     DOMAIN,
     MODE_TIMEOUT,
     MODE_UNTIL_OFF,
@@ -69,6 +72,7 @@ from .const import (
     SECTION_NIGHT,
     SECTION_SCHEDULE,
     SECTION_WINTER,
+    SUBENTRY_PROFILE,
 )
 
 LIGHTS_SELECTOR = TargetSelector(TargetSelectorConfig(entity={"domain": "light"}))
@@ -111,17 +115,14 @@ def _optional_entity(key: str, values: dict[str, Any]) -> probatio.Optional:
     return probatio.Optional(key, description={"suggested_value": values.get(key)})
 
 
-def _options_schema(options: dict[str, Any]) -> probatio.Schema:
+def _central_schema(options: dict[str, Any]) -> probatio.Schema:
     s = options[SECTION_SCHEDULE]
-    b = options[SECTION_BRIGHTNESS]
-    k = options[SECTION_COLOR_TEMP]
     c = options[SECTION_CURVE]
     w = options[SECTION_WINTER]
     m = options[SECTION_MANUAL]
     n = options[SECTION_NIGHT]
     return probatio.Schema(
         {
-            probatio.Required(CONF_LIGHTS, default=options[CONF_LIGHTS]): LIGHTS_SELECTOR,
             probatio.Required(SECTION_SCHEDULE): section(
                 probatio.Schema(
                     {
@@ -129,22 +130,6 @@ def _options_schema(options: dict[str, Any]) -> probatio.Schema:
                         _optional_entity(CONF_WAKE_ENTITY, s): SCHEDULE_ENTITY_SELECTOR,
                         probatio.Required(CONF_SLEEP_TIME, default=s[CONF_SLEEP_TIME]): TimeSelector(),
                         _optional_entity(CONF_SLEEP_ENTITY, s): SCHEDULE_ENTITY_SELECTOR,
-                    }
-                )
-            ),
-            probatio.Required(SECTION_BRIGHTNESS): section(
-                probatio.Schema(
-                    {
-                        probatio.Required(key, default=b[key]): PERCENT
-                        for key in (CONF_WAKE, CONF_PEAK, CONF_SLEEP)
-                    }
-                )
-            ),
-            probatio.Required(SECTION_COLOR_TEMP): section(
-                probatio.Schema(
-                    {
-                        probatio.Required(key, default=k[key]): KELVIN
-                        for key in (CONF_WAKE, CONF_PEAK, CONF_SLEEP)
                     }
                 )
             ),
@@ -168,17 +153,8 @@ def _options_schema(options: dict[str, Any]) -> probatio.Schema:
             ),
             probatio.Required(SECTION_WINTER): section(
                 probatio.Schema(
-                    {
-                        probatio.Required(CONF_ENABLED, default=w[CONF_ENABLED]): BooleanSelector(),
-                        probatio.Required(
-                            CONF_WAKE_BRIGHTNESS, default=w[CONF_WAKE_BRIGHTNESS]
-                        ): PERCENT,
-                        probatio.Required(
-                            CONF_PEAK_BRIGHTNESS, default=w[CONF_PEAK_BRIGHTNESS]
-                        ): PERCENT,
-                    }
-                ),
-                {"collapsed": True},
+                    {probatio.Required(CONF_ENABLED, default=w[CONF_ENABLED]): BooleanSelector()}
+                )
             ),
             probatio.Required(SECTION_MANUAL): section(
                 probatio.Schema(
@@ -199,9 +175,57 @@ def _options_schema(options: dict[str, Any]) -> probatio.Schema:
                 )
             ),
             probatio.Required(SECTION_NIGHT): section(
+                probatio.Schema({_optional_entity(CONF_ENTITY, n): NIGHT_ENTITY_SELECTOR})
+            ),
+        }
+    )
+
+
+def _profile_schema(values: dict[str, Any]) -> probatio.Schema:
+    b = values[SECTION_BRIGHTNESS]
+    k = values[SECTION_COLOR_TEMP]
+    w = values[SECTION_WINTER]
+    n = values[SECTION_NIGHT]
+    return probatio.Schema(
+        {
+            probatio.Required(
+                CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
+            ): TextSelector(),
+            probatio.Required(
+                CONF_LIGHTS, description={"suggested_value": values.get(CONF_LIGHTS)}
+            ): LIGHTS_SELECTOR,
+            probatio.Required(SECTION_BRIGHTNESS): section(
                 probatio.Schema(
                     {
-                        _optional_entity(CONF_ENTITY, n): NIGHT_ENTITY_SELECTOR,
+                        probatio.Required(key, default=b[key]): PERCENT
+                        for key in (CONF_WAKE, CONF_PEAK, CONF_SLEEP)
+                    }
+                )
+            ),
+            probatio.Required(SECTION_COLOR_TEMP): section(
+                probatio.Schema(
+                    {
+                        probatio.Required(key, default=k[key]): KELVIN
+                        for key in (CONF_WAKE, CONF_PEAK, CONF_SLEEP)
+                    }
+                )
+            ),
+            probatio.Required(SECTION_WINTER): section(
+                probatio.Schema(
+                    {
+                        probatio.Required(
+                            CONF_WAKE_BRIGHTNESS, default=w[CONF_WAKE_BRIGHTNESS]
+                        ): PERCENT,
+                        probatio.Required(
+                            CONF_PEAK_BRIGHTNESS, default=w[CONF_PEAK_BRIGHTNESS]
+                        ): PERCENT,
+                    }
+                ),
+                {"collapsed": True},
+            ),
+            probatio.Required(SECTION_NIGHT): section(
+                probatio.Schema(
+                    {
                         probatio.Required(CONF_BRIGHTNESS, default=n[CONF_BRIGHTNESS]): PERCENT,
                         probatio.Required(CONF_COLOR_TEMP, default=n[CONF_COLOR_TEMP]): KELVIN,
                     }
@@ -217,35 +241,16 @@ def _has_lights(target: dict[str, Any] | None) -> bool:
 
 
 class DaylightConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Create a profile."""
+    """Create the Daylight entry that holds the shared settings."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask for name and lights."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            if _has_lights(user_input[CONF_LIGHTS]):
-                options = deepcopy(DEFAULT_OPTIONS)
-                options[CONF_LIGHTS] = user_input[CONF_LIGHTS]
-                return self.async_create_entry(
-                    title=user_input[CONF_NAME], data={}, options=options
-                )
-            errors[CONF_LIGHTS] = "no_lights"
-        return self.async_show_form(
-            step_id="user",
-            data_schema=self.add_suggested_values_to_schema(
-                probatio.Schema(
-                    {
-                        probatio.Required(CONF_NAME): TextSelector(),
-                        probatio.Required(CONF_LIGHTS): LIGHTS_SELECTOR,
-                    }
-                ),
-                user_input,
-            ),
-            errors=errors,
+        """Create the entry with defaults; profiles are added to it afterwards."""
+        return self.async_create_entry(
+            title="Daylight", data={}, options=deepcopy(DEFAULT_CENTRAL)
         )
 
     @staticmethod
@@ -254,25 +259,71 @@ class DaylightConfigFlow(ConfigFlow, domain=DOMAIN):
         """Return the options flow."""
         return DaylightOptionsFlow()
 
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Profiles are subentries."""
+        return {SUBENTRY_PROFILE: ProfileSubentryFlow}
 
-class DaylightOptionsFlow(OptionsFlowWithReload):
-    """Edit a profile."""
+
+class DaylightOptionsFlow(OptionsFlow):
+    """Edit the shared settings. The entry's update listener reloads it."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show all settings, grouped in sections."""
+        """Show the shared settings, grouped in sections."""
         errors: dict[str, str] = {}
         current = self.config_entry.options
         if user_input is not None:
             schedule = user_input[SECTION_SCHEDULE]
-            if not _has_lights(user_input.get(CONF_LIGHTS)):
-                errors[CONF_LIGHTS] = "no_lights"
-            elif schedule[CONF_WAKE_TIME] == schedule[CONF_SLEEP_TIME]:
+            if schedule[CONF_WAKE_TIME] == schedule[CONF_SLEEP_TIME]:
                 errors["base"] = "same_times"
             else:
                 return self.async_create_entry(data=user_input)
             current = user_input
         return self.async_show_form(
-            step_id="init", data_schema=_options_schema(dict(current)), errors=errors
+            step_id="init", data_schema=_central_schema(dict(current)), errors=errors
+        )
+
+
+class ProfileSubentryFlow(ConfigSubentryFlow):
+    """Add or change a profile."""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Ask for name, lights and the profile's values."""
+        return await self._async_step_form("user", deepcopy(DEFAULT_PROFILE), user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Change a profile."""
+        subentry = self._get_reconfigure_subentry()
+        values = {CONF_NAME: subentry.title, **subentry.data}
+        return await self._async_step_form("reconfigure", values, user_input)
+
+    async def _async_step_form(
+        self, step_id: str, values: dict[str, Any], user_input: dict[str, Any] | None
+    ) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data = dict(user_input)
+            title = data.pop(CONF_NAME)
+            if _has_lights(data.get(CONF_LIGHTS)):
+                if step_id == "user":
+                    return self.async_create_entry(title=title, data=data)
+                return self.async_update_and_abort(
+                    self._get_entry(),
+                    self._get_reconfigure_subentry(),
+                    title=title,
+                    data=data,
+                )
+            errors[CONF_LIGHTS] = "no_lights"
+            values = user_input
+        return self.async_show_form(
+            step_id=step_id, data_schema=_profile_schema(values), errors=errors
         )

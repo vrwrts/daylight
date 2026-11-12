@@ -80,18 +80,18 @@ async def test_overlapping_profiles(
     # The oldest profile wins; the other leaves the light alone.
     assert set(older.runtime_data.lights) == {"light.desk", "light.sofa"}
     assert set(newer.runtime_data.lights) == {"light.hall"}
-    issue = ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{newer.entry_id}")
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{newer.subentry_id}")
     assert issue is not None
     assert "light.desk (owned by Normal)" in issue.translation_placeholders["lights"]
-    assert ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{older.entry_id}") is None
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{older.subentry_id}") is None
 
     await turn_on(hass, ["light.desk", "light.hall"])
     assert setup_lights["light.desk"].calls == [{"brightness": 255, "color_temp_kelvin": 3000}]
     assert setup_lights["light.hall"].calls == [{"brightness": 51, "color_temp_kelvin": 3000}]
 
-    # Disabling the older profile hands the light over and clears the issue.
-    assert await hass.config_entries.async_unload(older.entry_id)
+    # Removing the older profile hands the light over and clears the issue.
+    hass.config_entries.async_remove_subentry(older.entry, older.subentry_id)
     await hass.async_block_till_done()
     assert set(newer.runtime_data.lights) == {"light.desk", "light.hall"}
-    assert ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{newer.entry_id}") is None
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"overlap_{newer.subentry_id}") is None
     assert setup_lights["light.desk"].calls[-1] == {"brightness": 51, "color_temp_kelvin": 3000}
