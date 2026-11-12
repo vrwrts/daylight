@@ -100,6 +100,8 @@ async def async_merge_entries(hass: HomeAssistant) -> None:
             "migration_dropped_settings",
             config_entry_id=kept.entry_id,
             is_fixable=False,
+            # The merge runs only once, so the issue must outlive the next restart.
+            is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="migration_dropped_settings",
             translation_placeholders={"source": source, "profiles": "; ".join(dropped)},

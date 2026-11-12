@@ -112,6 +112,7 @@ async def test_merge(
 
     issue = ir.async_get(hass).async_get_issue(DOMAIN, "migration_dropped_settings")
     assert issue is not None
+    assert issue.is_persistent
     assert issue.translation_placeholders == {"source": "Normal", "profiles": "Spare (curve)"}
 
 
