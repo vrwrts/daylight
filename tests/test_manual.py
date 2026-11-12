@@ -258,7 +258,9 @@ async def _setup_night(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
+@pytest.mark.parametrize("service", ["turn_off", "toggle"])
 async def test_turn_off_waits_for_our_command(
+    service: str,
     hass: HomeAssistant,
     setup_lights: dict[str, MockLight],
     freezer: FrozenDateTimeFactory,
@@ -290,7 +292,7 @@ async def test_turn_off_waits_for_our_command(
         await asyncio.sleep(0)
 
     task = hass.async_create_task(
-        hass.services.async_call("light", "turn_off", {"entity_id": "light.desk"}, blocking=True)
+        hass.services.async_call("light", service, {"entity_id": "light.desk"}, blocking=True)
     )
     for _ in range(10):
         await asyncio.sleep(0)
