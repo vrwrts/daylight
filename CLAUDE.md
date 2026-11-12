@@ -1,10 +1,10 @@
 # Daylight
 
-A Home Assistant custom integration, installed through HACS, that sets the brightness and colour temperature of lights along a daily curve between wake and sleep times. Each config entry is a profile: a set of lights sharing one curve.
+A Home Assistant custom integration, installed through HACS, that sets the brightness and colour temperature of lights along a daily curve between wake and sleep times. There is one config entry with the shared schedule and curve. Each profile is a subentry: a set of lights with its own values along that curve.
 
 - `light.turn_on` and `light.turn_off` are intercepted (`interceptor.py`, `hub.py`). Turn-ons get the current values filled in. A turn-off holds back Daylight's own commands so they can't undo it.
-- Lights that are on are updated on an interval and when schedule or night mode entities change (`profile.py`).
-- A light changed by hand goes under manual control until it is turned off or a timeout runs out. The `daylight.resume` action ends manual control.
+- Lights that are on are updated on one shared interval and when schedule or night mode entities change (`__init__.py`). Each profile computes its own target (`profile.py`).
+- A light changed by hand goes under manual control until it is turned off or a timeout runs out. `daylight.pause` puts lights under manual control until `daylight.resume`, stored across restarts. `daylight.resume` ends manual control.
 - Night mode swaps the curve for fixed values while an entity, such as an `input_boolean`, is on.
 - The integration provides triggers and conditions for manual control (`trigger.py`, `condition.py`).
 

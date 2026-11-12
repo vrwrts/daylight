@@ -44,32 +44,41 @@ CONF_ENTITY: Final = "entity"
 CONF_BRIGHTNESS: Final = "brightness"
 CONF_COLOR_TEMP: Final = "color_temp"
 
-DEFAULT_OPTIONS: Final = {
+SUBENTRY_PROFILE: Final = "profile"
+
+# The Daylight entry's options: one schedule and curve shared by all profiles.
+DEFAULT_CENTRAL: Final = {
     SECTION_SCHEDULE: {CONF_WAKE_TIME: "07:00:00", CONF_SLEEP_TIME: "23:00:00"},
-    SECTION_BRIGHTNESS: {CONF_WAKE: 65, CONF_PEAK: 100, CONF_SLEEP: 30},
-    SECTION_COLOR_TEMP: {CONF_WAKE: 2000, CONF_PEAK: 3000, CONF_SLEEP: 2000},
     SECTION_CURVE: {
         CONF_RAMP_DURATION: 120,
         CONF_CURVE: CURVE_COSINE,
         CONF_TRANSITION: 10,
         CONF_UPDATE_INTERVAL: 60,
     },
-    SECTION_WINTER: {
-        CONF_ENABLED: False,
-        CONF_WAKE_BRIGHTNESS: 90,
-        CONF_PEAK_BRIGHTNESS: 100,
-    },
+    SECTION_WINTER: {CONF_ENABLED: False},
     SECTION_MANUAL: {
         CONF_MODE: MODE_UNTIL_OFF,
         CONF_TIMEOUT: 30,
         CONF_BRIGHTNESS_TOLERANCE: 6,
         CONF_COLOR_TEMP_TOLERANCE: 150,
     },
+    SECTION_NIGHT: {},
+}
+
+# A profile subentry's data, without its lights: the values along the curve.
+DEFAULT_PROFILE: Final = {
+    SECTION_BRIGHTNESS: {CONF_WAKE: 65, CONF_PEAK: 100, CONF_SLEEP: 30},
+    SECTION_COLOR_TEMP: {CONF_WAKE: 2000, CONF_PEAK: 3000, CONF_SLEEP: 2000},
+    SECTION_WINTER: {CONF_WAKE_BRIGHTNESS: 90, CONF_PEAK_BRIGHTNESS: 100},
     SECTION_NIGHT: {CONF_BRIGHTNESS: 1, CONF_COLOR_TEMP: 2000},
 }
 
 SERVICE_RESUME: Final = "resume"
-ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"
+SERVICE_PAUSE: Final = "pause"
+ATTR_SUBENTRY_ID: Final = "subentry_id"
+
+STORAGE_KEY: Final = DOMAIN
+STORAGE_VERSION: Final = 1
 
 SIGNAL_MANUAL_CONTROL: Final = f"{DOMAIN}_manual_control"
 
@@ -78,6 +87,7 @@ REASON_EXTERNAL_CHANGE: Final = "external_change"
 REASON_TURNED_OFF: Final = "turned_off"
 REASON_TIMEOUT: Final = "timeout"
 REASON_RESUME: Final = "resume"
+REASON_PAUSED: Final = "paused"
 
 # Seconds after our own command during which reported changes are not treated
 # as manual, on top of the transition (JEHA uses the same margin).

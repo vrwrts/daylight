@@ -6,9 +6,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant.common import MockConfigEntry
 
-from custom_components.daylight.const import DOMAIN
-
-from .conftest import NOON, MockLight, add_profile, make_options, turn_on
+from .conftest import NOON, MockLight, add_profile, make_entry, turn_on
 
 ALL = {
     "entity_id": [
@@ -99,7 +97,7 @@ async def test_unload_removes_interceptor(
     assert hass.services._services["light"]["turn_on"] is not original
     assert hass.services._services["light"]["turn_off"] is not original_off
 
-    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert await hass.config_entries.async_unload(entry.entry.entry_id)
     await hass.async_block_till_done()
     assert hass.services._services["light"]["turn_on"] is original
     assert hass.services._services["light"]["turn_off"] is original_off
@@ -112,7 +110,7 @@ async def test_interceptor_fails_loudly(
     hass: HomeAssistant, setup_lights: dict[str, MockLight]
 ) -> None:
     del hass.services._services["light"]["turn_on"]
-    entry = MockConfigEntry(domain=DOMAIN, title="Main", options=make_options(ALL))
+    entry = make_entry(ALL)
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

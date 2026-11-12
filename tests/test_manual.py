@@ -207,7 +207,7 @@ async def test_resume_needs_target(
     # Resuming by profile is no longer part of the action.
     with pytest.raises(probatio.Invalid):
         await hass.services.async_call(
-            DOMAIN, "resume", {"config_entry_id": entry.entry_id}, blocking=True
+            DOMAIN, "resume", {"config_entry_id": entry.entry.entry_id}, blocking=True
         )
 
 

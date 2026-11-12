@@ -20,7 +20,7 @@ from homeassistant.helpers.trigger import (
 )
 from homeassistant.helpers.typing import ConfigType
 
-from .const import ATTR_CONFIG_ENTRY_ID, SIGNAL_MANUAL_CONTROL
+from .const import ATTR_SUBENTRY_ID, SIGNAL_MANUAL_CONTROL
 from .hub import DATA_HUB
 
 if TYPE_CHECKING:
@@ -79,7 +79,7 @@ class ManualControlTrigger(Trigger):
             run_action(
                 {
                     ATTR_ENTITY_ID: entity_id,
-                    ATTR_CONFIG_ENTRY_ID: profile.entry.entry_id,
+                    ATTR_SUBENTRY_ID: profile.subentry_id,
                     "profile": profile.title,
                     "reason": reason,
                 },

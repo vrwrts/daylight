@@ -29,6 +29,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
@@ -41,7 +42,10 @@ from .const import (
     OFF_WAIT_TIMEOUT,
     QUIET_WINDOW_MARGIN,
     REASON_EXPLICIT_VALUES,
+    REASON_PAUSED,
     REASON_RESUME,
+    STORAGE_KEY,
+    STORAGE_VERSION,
 )
 from .light_data import BRIGHTNESS_KEYS, COLOR_KEYS
 from .profile import Profile
@@ -53,6 +57,8 @@ DATA_HUB: HassKey[Hub] = HassKey(DOMAIN)
 TARGET_KEYS = (ATTR_ENTITY_ID, ATTR_DEVICE_ID, ATTR_AREA_ID, ATTR_FLOOR_ID, ATTR_LABEL_ID)
 # How long a context we created is recognised as ours.
 CONTEXT_TTL = 600
+# Batch writes of the paused lights when several pause/resume calls follow each other.
+SAVE_DELAY = 1
 
 
 class Hub:
@@ -61,6 +67,7 @@ class Hub:
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialise."""
         self.hass = hass
+        # In subentry order, which decides who owns a light in two profiles.
         self.profiles: dict[str, Profile] = {}
         self.owner: dict[str, Profile] = {}
         self._contexts: OrderedDict[str, float] = OrderedDict()
@@ -68,6 +75,21 @@ class Hub:
         self._remove_off_interceptor: CALLBACK_TYPE | None = None
         self._unsub_state: CALLBACK_TYPE | None = None
         self._overlaps: dict[str, frozenset[str]] = {}
+        self.paused: set[str] = set()
+        self._store: Store[dict[str, list[str]]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+
+    async def async_load(self) -> None:
+        """Load the lights paused before the last restart."""
+        if data := await self._store.async_load():
+            self.paused = set(data.get("paused", []))
+
+    def _save(self) -> None:
+        self._store.async_delay_save(lambda: {"paused": sorted(self.paused)}, SAVE_DELAY)
+
+    async def async_clear(self) -> None:
+        """Forget all pauses, for when the Daylight entry is removed."""
+        self.paused.clear()
+        await self._store.async_remove()
 
     # Contexts
 
@@ -107,14 +129,14 @@ class Hub:
             self._unsub_state = self.hass.bus.async_listen(
                 EVENT_STATE_CHANGED, self._handle_state, self._filter_state
             )
-        self.profiles[profile.entry.entry_id] = profile
+        self.profiles[profile.subentry_id] = profile
 
     @callback
     def async_remove_profile(self, profile: Profile) -> None:
         """Unregister a profile; remove the interceptor after the last one."""
-        self.profiles.pop(profile.entry.entry_id, None)
-        ir.async_delete_issue(self.hass, DOMAIN, f"overlap_{profile.entry.entry_id}")
-        self._overlaps.pop(profile.entry.entry_id, None)
+        self.profiles.pop(profile.subentry_id, None)
+        ir.async_delete_issue(self.hass, DOMAIN, f"overlap_{profile.subentry_id}")
+        self._overlaps.pop(profile.subentry_id, None)
         if self.profiles:
             self.async_update_ownership()
             return
@@ -160,26 +182,26 @@ class Hub:
         """Give each light to the oldest profile that includes it."""
         owner: dict[str, Profile] = {}
         contested: dict[str, dict[str, Profile]] = {}
-        for profile in sorted(self.profiles.values(), key=lambda p: p.entry.created_at):
+        for profile in self.profiles.values():
             for entity_id in profile.resolved:
                 if (winner := owner.get(entity_id)) is None:
                     owner[entity_id] = profile
                 else:
-                    contested.setdefault(profile.entry.entry_id, {})[entity_id] = winner
+                    contested.setdefault(profile.subentry_id, {})[entity_id] = winner
         self.owner = owner
         for profile in self.profiles.values():
             profile.async_set_owned(
                 {e for e, p in owner.items() if p is profile}
             )
-            self._report_overlap(profile, contested.get(profile.entry.entry_id, {}))
+            self._report_overlap(profile, contested.get(profile.subentry_id, {}))
 
     def _report_overlap(self, profile: Profile, lights: dict[str, Profile]) -> None:
-        entry_id = profile.entry.entry_id
-        issue_id = f"overlap_{entry_id}"
-        key = frozenset(f"{e}:{p.entry.entry_id}" for e, p in lights.items())
-        if self._overlaps.get(entry_id) == key:
+        subentry_id = profile.subentry_id
+        issue_id = f"overlap_{subentry_id}"
+        key = frozenset(f"{e}:{p.subentry_id}" for e, p in lights.items())
+        if self._overlaps.get(subentry_id) == key:
             return
-        self._overlaps[entry_id] = key
+        self._overlaps[subentry_id] = key
         if not lights:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
@@ -193,7 +215,7 @@ class Hub:
             self.hass,
             DOMAIN,
             issue_id,
-            config_entry_id=entry_id,
+            config_entry_id=profile.entry.entry_id,
             is_fixable=False,
             severity=ir.IssueSeverity.WARNING,
             translation_key="overlap",
@@ -220,16 +242,33 @@ class Hub:
         if (profile := self.owner.get(event.data["entity_id"])) is not None:
             profile.async_handle_light_state(event)
 
-    # Resume
+    # Pause and resume
+
+    @callback
+    def async_pause(self, entity_ids: set[str]) -> None:
+        """Stop adapting lights until they are resumed, across restarts.
+
+        Lights no profile owns are ignored.
+        """
+        for entity_id in self.expand(entity_ids)[0]:
+            if (profile := self.owner.get(entity_id)) is None:
+                continue
+            self.paused.add(entity_id)
+            profile.mark_manual(entity_id, REASON_PAUSED)
+        self._save()
 
     async def async_resume(self, entity_ids: set[str]) -> None:
-        """Clear manual control and adapt straight away.
+        """Clear manual control and pauses, and adapt straight away.
 
         Each light is resumed by the profile that owns it; lights no profile
-        owns are ignored.
+        owns are ignored, apart from forgetting a pause.
         """
         tasks = []
-        for entity_id in self.expand(entity_ids)[0]:
+        lights = self.expand(entity_ids)[0]
+        if self.paused & lights:
+            self.paused -= lights
+            self._save()
+        for entity_id in lights:
             if (profile := self.owner.get(entity_id)) is None:
                 continue
             profile.clear_manual(entity_id, REASON_RESUME)

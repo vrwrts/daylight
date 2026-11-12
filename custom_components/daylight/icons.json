@@ -1,6 +1,7 @@
 {
   "services": {
-    "resume": { "service": "mdi:play-circle-outline" }
+    "resume": { "service": "mdi:play-circle-outline" },
+    "pause": { "service": "mdi:pause-circle-outline" }
   },
   "triggers": {
     "manual_control_started": { "trigger": "mdi:hand-back-right" },

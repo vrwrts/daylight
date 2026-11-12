@@ -39,6 +39,8 @@ async def _automations(
                                 "entity_id": "{{ trigger.entity_id }}",
                                 "reason": "{{ trigger.reason }}",
                                 "profile": "{{ trigger.profile }}",
+                                "subentry_id": "{{ trigger.subentry_id }}",
+                                "config_entry_id": "{{ trigger.config_entry_id }}",
                             },
                         }
                     ],
@@ -59,7 +61,7 @@ async def test_started_and_ended(
     hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
 ) -> None:
     freezer.move_to(NOON)
-    await add_profile(hass, TARGET, title="Normal")
+    profile = await add_profile(hass, TARGET, title="Normal")
     desk = {"entity_id": "light.desk"}
     calls = await _automations(
         hass, ("manual_control_started", desk), ("manual_control_ended", desk)
@@ -75,6 +77,8 @@ async def test_started_and_ended(
             "entity_id": "light.desk",
             "reason": "explicit_values",
             "profile": "Normal",
+            "subentry_id": profile.subentry_id,
+            "config_entry_id": "",
         }
     ]
 
@@ -82,7 +86,7 @@ async def test_started_and_ended(
     assert _reasons(calls, "manual_control_ended") == ["turned_off"]
 
     await turn_on(hass, "light.desk")
-    state = hass.config_entries.async_entries(DOMAIN)[0].runtime_data.lights["light.desk"]
+    state = profile.runtime_data.lights["light.desk"]
     state.last_sent_at -= 3600
     setup_lights["light.desk"].external(brightness=20)
     await hass.async_block_till_done()
