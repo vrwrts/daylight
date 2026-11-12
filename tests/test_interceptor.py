@@ -94,12 +94,15 @@ async def test_unload_removes_interceptor(
 ) -> None:
     freezer.move_to(NOON)
     original = hass.services._services["light"]["turn_on"]
+    original_off = hass.services._services["light"]["turn_off"]
     entry = await add_profile(hass, ALL)
     assert hass.services._services["light"]["turn_on"] is not original
+    assert hass.services._services["light"]["turn_off"] is not original_off
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert hass.services._services["light"]["turn_on"] is original
+    assert hass.services._services["light"]["turn_off"] is original_off
 
     await turn_on(hass, "light.desk")
     assert setup_lights["light.desk"].calls == [{}]

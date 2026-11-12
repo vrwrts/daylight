@@ -8,7 +8,7 @@ import logging
 import time as monotonic_time
 from typing import Any
 
-from homeassistant.components.light import ATTR_EFFECT, ATTR_FLASH
+from homeassistant.components.light import ATTR_EFFECT, ATTR_FLASH, ATTR_TRANSITION
 from homeassistant.const import (
     ATTR_AREA_ID,
     ATTR_DEVICE_ID,
@@ -36,7 +36,13 @@ from homeassistant.helpers.target import (
 from homeassistant.util.hass_dict import HassKey
 
 from . import interceptor
-from .const import DOMAIN, REASON_EXPLICIT_VALUES, REASON_RESUME
+from .const import (
+    DOMAIN,
+    OFF_WAIT_TIMEOUT,
+    QUIET_WINDOW_MARGIN,
+    REASON_EXPLICIT_VALUES,
+    REASON_RESUME,
+)
 from .light_data import BRIGHTNESS_KEYS, COLOR_KEYS
 from .profile import Profile
 
@@ -59,6 +65,7 @@ class Hub:
         self.owner: dict[str, Profile] = {}
         self._contexts: OrderedDict[str, float] = OrderedDict()
         self._remove_interceptor: CALLBACK_TYPE | None = None
+        self._remove_off_interceptor: CALLBACK_TYPE | None = None
         self._unsub_state: CALLBACK_TYPE | None = None
         self._overlaps: dict[str, frozenset[str]] = {}
 
@@ -87,9 +94,15 @@ class Hub:
                 self._remove_interceptor = interceptor.async_install(
                     self.hass, "light", "turn_on", self._async_intercept
                 )
+                self._remove_off_interceptor = interceptor.async_install(
+                    self.hass, "light", "turn_off", self._async_intercept_off
+                )
             except interceptor.InterceptorError as err:
+                if self._remove_interceptor:
+                    self._remove_interceptor()
+                    self._remove_interceptor = None
                 raise ConfigEntryError(
-                    f"Can't intercept light.turn_on, Home Assistant's internals changed: {err}"
+                    f"Can't intercept light services, Home Assistant's internals changed: {err}"
                 ) from err
             self._unsub_state = self.hass.bus.async_listen(
                 EVENT_STATE_CHANGED, self._handle_state, self._filter_state
@@ -112,6 +125,9 @@ class Hub:
         if self._remove_interceptor:
             self._remove_interceptor()
             self._remove_interceptor = None
+        if self._remove_off_interceptor:
+            self._remove_off_interceptor()
+            self._remove_off_interceptor = None
 
     def expand(self, entity_ids: set[str]) -> tuple[set[str], set[str]]:
         """Replace HA light groups by their members. Return (lights, groups)."""
@@ -266,6 +282,7 @@ class Hub:
             # light group in the same call forwards it to its members.
             if light.manual or light.intercepted_context == call.context.id:
                 continue
+            light.off_until = None
             if explicit_brightness or explicit_color:
                 profile.mark_manual(entity_id, REASON_EXPLICIT_VALUES)
             profile.update_target()
@@ -305,3 +322,31 @@ class Hub:
         data = {k: v for k, v in call.data.items() if k not in TARGET_KEYS}
         data[ATTR_ENTITY_ID] = sorted(targets - set(fills))
         return data
+
+    async def _async_intercept_off(self, call: ServiceCall) -> None:
+        """Make sure our own commands can't undo a light.turn_off.
+
+        Something reacting to the same event (night mode turning on) may have
+        just sent a turn_on with new values. Let that finish before the off
+        goes out, and send nothing more until the off has landed.
+        """
+        if self.is_ours(call.context):
+            return None
+        params = call.data.get("params", call.data)
+        until = (
+            monotonic_time.monotonic()
+            + float(params.get(ATTR_TRANSITION) or 0)
+            + QUIET_WINDOW_MARGIN
+        )
+        pending = []
+        for entity_id in self._call_targets(dict(call.data)):
+            if (profile := self.owner.get(entity_id)) is None:
+                continue
+            if (light := profile.lights.get(entity_id)) is None:
+                continue
+            light.off_until = until
+            if light.inflight is not None:
+                pending.append(light.inflight)
+        if pending:
+            await asyncio.wait(pending, timeout=OFF_WAIT_TIMEOUT)
+        return None
