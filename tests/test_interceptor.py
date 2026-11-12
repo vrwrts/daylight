@@ -1,12 +1,13 @@
-"""Interception of light.turn_on, groups, and unloading."""
+"""Interception of light.turn_on and light.toggle, groups, and unloading."""
 
 from freezegun.api import FrozenDateTimeFactory
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import MockConfigEntry
 
-from .conftest import NOON, MockLight, add_profile, make_entry, turn_on
+from .conftest import NOON, MockLight, add_profile, make_entry, toggle, turn_on
 
 ALL = {
     "entity_id": [
@@ -65,6 +66,54 @@ async def test_explicit_values_stick(
     assert setup_lights["light.desk"].calls[-1] == {}
 
 
+async def test_toggle_on_fills_values(
+    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
+) -> None:
+    freezer.move_to(NOON)
+    entry = await add_profile(hass, ALL)
+
+    await toggle(hass, "light.desk")
+    assert setup_lights["light.desk"].calls == [
+        {"brightness": 255, "color_temp_kelvin": 3000}
+    ]
+    assert not entry.runtime_data.lights["light.desk"].manual
+
+    await toggle(hass, "light.sofa", brightness_pct=30)
+    assert setup_lights["light.sofa"].calls == [{"brightness": 76, "color_temp_kelvin": 3000}]
+    assert entry.runtime_data.lights["light.sofa"].manual
+
+
+async def test_toggle_mixed(
+    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
+) -> None:
+    freezer.move_to(NOON)
+    await add_profile(hass, {"entity_id": ["light.desk", "light.sofa"]})
+    await turn_on(hass, "light.sofa")
+
+    await toggle(hass, ["light.desk", "light.sofa", "light.hall"], transition=2)
+    assert setup_lights["light.desk"].calls == [
+        {"brightness": 255, "color_temp_kelvin": 3000, "transition": 2}
+    ]
+    assert hass.states.get("light.sofa").state == "off"
+    assert setup_lights["light.hall"].calls == [{"transition": 2}]
+
+
+async def test_homeassistant_toggle(
+    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
+) -> None:
+    freezer.move_to(NOON)
+    assert await async_setup_component(hass, "homeassistant", {})
+    await add_profile(hass, ALL)
+
+    await hass.services.async_call(
+        "homeassistant", "toggle", {"entity_id": "light.desk"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert setup_lights["light.desk"].calls == [
+        {"brightness": 255, "color_temp_kelvin": 3000}
+    ]
+
+
 async def test_unmanaged_lights_untouched(
     hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
 ) -> None:
@@ -93,14 +142,17 @@ async def test_unload_removes_interceptor(
     freezer.move_to(NOON)
     original = hass.services._services["light"]["turn_on"]
     original_off = hass.services._services["light"]["turn_off"]
+    original_toggle = hass.services._services["light"]["toggle"]
     entry = await add_profile(hass, ALL)
     assert hass.services._services["light"]["turn_on"] is not original
     assert hass.services._services["light"]["turn_off"] is not original_off
+    assert hass.services._services["light"]["toggle"] is not original_toggle
 
     assert await hass.config_entries.async_unload(entry.entry.entry_id)
     await hass.async_block_till_done()
     assert hass.services._services["light"]["turn_on"] is original
     assert hass.services._services["light"]["turn_off"] is original_off
+    assert hass.services._services["light"]["toggle"] is original_toggle
 
     await turn_on(hass, "light.desk")
     assert setup_lights["light.desk"].calls == [{}]
@@ -181,3 +233,19 @@ async def test_group_membership_change(
     await hass.config_entries.async_reload(group_entry.entry_id)
     await hass.async_block_till_done()
     assert set(entry.runtime_data.lights) == {"light.desk", "light.sofa"}
+
+
+async def test_toggle_group(
+    hass: HomeAssistant, setup_lights: dict[str, MockLight], freezer: FrozenDateTimeFactory
+) -> None:
+    freezer.move_to(NOON)
+    group = await _light_group(hass, ["light.desk", "light.narrow"])
+    await add_profile(hass, {"entity_id": [group]})
+
+    await toggle(hass, group)
+    assert setup_lights["light.desk"].calls == [{"brightness": 255, "color_temp_kelvin": 3000}]
+    assert setup_lights["light.narrow"].calls == [{"brightness": 255, "color_temp_kelvin": 3000}]
+
+    await toggle(hass, group)
+    assert hass.states.get("light.desk").state == "off"
+    assert hass.states.get("light.narrow").state == "off"

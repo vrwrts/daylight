@@ -404,7 +404,7 @@ class Profile:
 
         if old is None or old.state != STATE_ON:
             # Turned on without going through interception (wall switch,
-            # remote, toggle): correct it straight away.
+            # remote): correct it straight away.
             if not light.manual and not self._is_ours(light, new):
                 light.off_until = None
                 self.update_target()

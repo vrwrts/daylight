@@ -211,3 +211,11 @@ async def turn_off(hass: HomeAssistant, entity_id: str | list[str]) -> None:
         "light", "turn_off", {"entity_id": entity_id}, blocking=True
     )
     await hass.async_block_till_done()
+
+
+async def toggle(hass: HomeAssistant, entity_id: str | list[str], **data: Any) -> None:
+    """Call light.toggle and wait for everything it causes."""
+    await hass.services.async_call(
+        "light", "toggle", {"entity_id": entity_id, **data}, blocking=True
+    )
+    await hass.async_block_till_done()

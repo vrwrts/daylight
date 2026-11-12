@@ -17,6 +17,7 @@ from homeassistant.const import (
     ATTR_LABEL_ID,
     ENTITY_MATCH_ALL,
     EVENT_STATE_CHANGED,
+    STATE_ON,
 )
 from homeassistant.core import (
     CALLBACK_TYPE,
@@ -73,6 +74,7 @@ class Hub:
         self._contexts: OrderedDict[str, float] = OrderedDict()
         self._remove_interceptor: CALLBACK_TYPE | None = None
         self._remove_off_interceptor: CALLBACK_TYPE | None = None
+        self._remove_toggle_interceptor: CALLBACK_TYPE | None = None
         self._unsub_state: CALLBACK_TYPE | None = None
         self._overlaps: dict[str, frozenset[str]] = {}
         self.paused: set[str] = set()
@@ -119,10 +121,16 @@ class Hub:
                 self._remove_off_interceptor = interceptor.async_install(
                     self.hass, "light", "turn_off", self._async_intercept_off
                 )
+                self._remove_toggle_interceptor = interceptor.async_install(
+                    self.hass, "light", "toggle", self._async_intercept_toggle
+                )
             except interceptor.InterceptorError as err:
                 if self._remove_interceptor:
                     self._remove_interceptor()
                     self._remove_interceptor = None
+                if self._remove_off_interceptor:
+                    self._remove_off_interceptor()
+                    self._remove_off_interceptor = None
                 raise ConfigEntryError(
                     f"Can't intercept light services, Home Assistant's internals changed: {err}"
                 ) from err
@@ -150,6 +158,9 @@ class Hub:
         if self._remove_off_interceptor:
             self._remove_off_interceptor()
             self._remove_off_interceptor = None
+        if self._remove_toggle_interceptor:
+            self._remove_toggle_interceptor()
+            self._remove_toggle_interceptor = None
 
     def expand(self, entity_ids: set[str]) -> tuple[set[str], set[str]]:
         """Replace HA light groups by their members. Return (lights, groups)."""
@@ -389,3 +400,45 @@ class Hub:
         if pending:
             await asyncio.wait(pending, timeout=OFF_WAIT_TIMEOUT)
         return None
+
+    async def _async_intercept_toggle(self, call: ServiceCall) -> dict[str, Any] | None:
+        """Send managed lights a light.turn_on or light.turn_off instead.
+
+        Whether a toggle turns a light on or off is decided per light, so
+        there is no single set of values to fill in. Splitting it lets the
+        turn_on and turn_off interceptors handle each light as usual.
+        """
+        if self.is_ours(call.context):
+            return None
+        targets = self._call_targets(dict(call.data))
+        managed = {e for e in targets if e in self.owner}
+        if not managed:
+            return None
+        params: dict[str, Any] = dict(call.data.get("params", {}))
+        on = {
+            e for e in managed if (state := self.hass.states.get(e)) and state.state == STATE_ON
+        }
+        calls = []
+        if managed - on:
+            calls.append(("turn_on", params, managed - on))
+        if on:
+            # Like a toggle, drop what a turn-off doesn't take.
+            off_params = {k: params[k] for k in (ATTR_TRANSITION, ATTR_FLASH) if k in params}
+            calls.append(("turn_off", off_params, on))
+        # The caller's context, not ours, so the interceptors treat these as
+        # the caller's calls, as with a light group forwarding to members.
+        await asyncio.gather(
+            *(
+                self.hass.services.async_call(
+                    "light",
+                    service,
+                    {**data, ATTR_ENTITY_ID: sorted(entity_ids)},
+                    blocking=True,
+                    context=call.context,
+                )
+                for service, data, entity_ids in calls
+            )
+        )
+        data = {k: v for k, v in call.data.items() if k not in TARGET_KEYS}
+        data[ATTR_ENTITY_ID] = sorted(targets - managed)
+        return data
