@@ -1,5 +1,11 @@
 {
   "config": {
+    "step": {
+      "user": {
+        "title": "Daylight",
+        "description": "Set up Daylight, then add profiles to it."
+      }
+    },
     "abort": {
       "single_instance_allowed": "Daylight is already set up. Add profiles to it instead."
     }
