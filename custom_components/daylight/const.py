@@ -82,3 +82,7 @@ REASON_RESUME: Final = "resume"
 # Seconds after our own command during which reported changes are not treated
 # as manual, on top of the transition (JEHA uses the same margin).
 QUIET_WINDOW_MARGIN: Final = 5
+
+# Longest an intercepted turn_off waits for our own command to the same light
+# to finish, so a slow integration can't hold up the turn_off for long.
+OFF_WAIT_TIMEOUT: Final = 2

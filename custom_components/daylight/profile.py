@@ -102,6 +102,9 @@ class LightState:
     last_sent_at: float | None = None
     # Context of the last intercepted turn-on; its state changes are ours.
     intercepted_context: str | None = None
+    # Until this monotonic time a turn_off is landing; sending would undo it.
+    off_until: float | None = None
+    inflight: asyncio.Task[Any] | None = field(default=None, repr=False)
     cancel_timer: CALLBACK_TYPE | None = field(default=None, repr=False)
 
 
@@ -293,21 +296,34 @@ class Profile:
         state = self.hass.states.get(entity_id)
         if light is None or light.manual or state is None or state.state != STATE_ON:
             return
+        now = monotonic_time.monotonic()
+        if light.off_until is not None and now < light.off_until:
+            return
         data = self.light_data(state)
         if not data or (not force and data == light.last_sent):
             return
         light.last_sent = data
-        light.last_sent_at = monotonic_time.monotonic()
+        light.last_sent_at = now
         service_data: dict[str, Any] = {ATTR_ENTITY_ID: entity_id, **data}
         if transition:
             service_data[ATTR_TRANSITION] = transition
-        await self.hass.services.async_call(
-            "light",
-            "turn_on",
-            service_data,
-            blocking=True,
-            context=self.hub.new_context(),
+        # Kept so an intercepted turn_off can wait for it to reach the light
+        # first; otherwise our turn_on could land after the off and undo it.
+        task = self.hass.async_create_task(
+            self.hass.services.async_call(
+                "light",
+                "turn_on",
+                service_data,
+                blocking=True,
+                context=self.hub.new_context(),
+            )
         )
+        light.inflight = task
+        try:
+            await task
+        finally:
+            if light.inflight is task:
+                light.inflight = None
 
     async def async_adapt_all(self, *, transition: float | None = None) -> None:
         """Push the current target to every owned light."""
@@ -396,6 +412,7 @@ class Profile:
             # Turned on without going through interception (wall switch,
             # remote, toggle): correct it straight away.
             if not light.manual and not self._is_ours(light, new):
+                light.off_until = None
                 self.update_target()
                 self.hass.async_create_task(self.async_adapt(entity_id, force=True))
             return

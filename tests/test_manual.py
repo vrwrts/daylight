@@ -1,5 +1,6 @@
 """Periodic updates, manual control, night mode and daylight.resume."""
 
+import asyncio
 from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
@@ -12,6 +13,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import (
+    MockConfigEntry,
     async_fire_time_changed,
     setup_test_component_platform,
 )
@@ -241,6 +243,93 @@ async def test_night_mode(
     )
     await hass.async_block_till_done()
     assert setup_lights["light.desk"].calls[-1]["brightness"] == 3
+
+
+async def _sleep_mode_on(hass: HomeAssistant) -> None:
+    await hass.services.async_call(
+        "input_boolean", "turn_on", {"entity_id": "input_boolean.sleep_mode"}, blocking=True
+    )
+
+
+async def _setup_night(hass: HomeAssistant) -> MockConfigEntry:
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"sleep_mode": {}}})
+    entry = await add_profile(hass, TARGET, night_mode={"entity": "input_boolean.sleep_mode"})
+    await turn_on(hass, "light.desk")
+    return entry
+
+
+async def test_turn_off_waits_for_our_command(
+    hass: HomeAssistant,
+    setup_lights: dict[str, MockLight],
+    freezer: FrozenDateTimeFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Night mode adapt already on its way when an automation turns the light off."""
+    freezer.move_to(NOON)
+    entry = await _setup_night(hass)
+    desk = setup_lights["light.desk"]
+    state = entry.runtime_data.lights["light.desk"]
+    order: list[str] = []
+    gate = asyncio.Event()
+    original_on, original_off = desk.async_turn_on, desk.async_turn_off
+
+    async def slow_on(**kwargs):
+        order.append("on")
+        await gate.wait()
+        await original_on(**kwargs)
+
+    async def off(**kwargs):
+        order.append("off")
+        await original_off(**kwargs)
+
+    monkeypatch.setattr(desk, "async_turn_on", slow_on)
+    monkeypatch.setattr(desk, "async_turn_off", off)
+
+    await _sleep_mode_on(hass)
+    while state.inflight is None or order != ["on"]:
+        await asyncio.sleep(0)
+
+    task = hass.async_create_task(
+        hass.services.async_call("light", "turn_off", {"entity_id": "light.desk"}, blocking=True)
+    )
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert order == ["on"]  # the off waits for our turn_on
+
+    gate.set()
+    await task
+    await hass.async_block_till_done()
+    assert order == ["on", "off"]
+    assert hass.states.get("light.desk").state == "off"
+
+
+async def test_no_command_while_turn_off_lands(
+    hass: HomeAssistant,
+    setup_lights: dict[str, MockLight],
+    freezer: FrozenDateTimeFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The light still reports on after a turn_off; night mode must not undo it."""
+    freezer.move_to(NOON)
+    entry = await _setup_night(hass)
+    desk = setup_lights["light.desk"]
+    calls_before = len(desk.calls)
+
+    async def off_reported_later(**kwargs):
+        desk._attr_is_on = False  # applied, but the state isn't reported yet
+
+    monkeypatch.setattr(desk, "async_turn_off", off_reported_later)
+    await turn_off(hass, "light.desk")
+    assert hass.states.get("light.desk").state == "on"
+
+    await _sleep_mode_on(hass)
+    await hass.async_block_till_done()
+    assert len(desk.calls) == calls_before
+
+    # Turning it back on straight away is adapted as usual.
+    await turn_on(hass, "light.desk")
+    assert entry.runtime_data.lights["light.desk"].off_until is None
+    assert desk.calls[-1] == {"brightness": 3, "color_temp_kelvin": 2200}
 
 
 async def test_schedule_entity(

@@ -116,6 +116,8 @@ A light that's turned on outside Home Assistant (wall switch, remote) or with `l
 
 While the entity is on, Daylight uses the night values instead of the curve. When the entity changes, lights that are on and not under manual control get the new values straight away. Manual control works the same as during the day.
 
+If an automation turns lights off on the same change, as many bedtime automations do, the turn-off wins. Daylight lets its own command reach the light first and sends nothing more to that light until the turn-off has landed. This covers `light.turn_off` calls made through Home Assistant, not `light.toggle` or switches that talk to the lights directly.
+
 ## Light capabilities
 
 Daylight sends brightness and colour temperature to lights that support colour temperature, clamped to each light's range. Lights that only dim get brightness only. On/off lights are left alone. Calls that use `flash` or `effect` are passed through unchanged.
@@ -172,7 +174,7 @@ conditions:
 
 ## Private Home Assistant API
 
-To fill in values before a light turns on, Daylight wraps the registered `light.turn_on` handler through `hass.services._services`, a private part of Home Assistant. Adaptive Lighting does the same. If a Home Assistant update changes those internals, Daylight profiles fail to set up with an error that says so, rather than running without interception. Unloading the last profile restores the original handler.
+To fill in values before a light turns on, and to keep its own commands from undoing a turn-off, Daylight wraps the registered `light.turn_on` and `light.turn_off` handlers through `hass.services._services`, a private part of Home Assistant. Adaptive Lighting does the same. If a Home Assistant update changes those internals, Daylight profiles fail to set up with an error that says so, rather than running without interception. Unloading the last profile restores the original handlers.
 
 ## Development
 
