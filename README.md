@@ -50,7 +50,7 @@ These apply to every profile.
 | Sleep time | 23:00 | End of the evening ramp. |
 | Sleep time entity | none | Optional. Replaces the sleep time while it has a valid value. |
 
-The entities can be timestamp sensors (such as `sensor.next_alarm`), `input_datetime` helpers or time entities. Daylight uses the local time of day and ignores the date, so an alarm set for tomorrow at 06:45 means 06:45. If the entity is unavailable, unknown or holds no time, the fixed time is used. A change to either entity applies straight away.
+The entities can be timestamp sensors, `input_datetime` helpers or time entities. Daylight uses the local time of day and ignores the date. If the entity is unavailable, unknown or holds no time, the fixed time is used. A change to either entity applies straight away.
 
 A sleep time after midnight works, and so does a wake time later than the sleep time.
 
